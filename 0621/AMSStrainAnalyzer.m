@@ -117,9 +117,9 @@ classdef AMSStrainAnalyzer < handle
         %             cos(i1)*sin(d1), cos(i2)*sin(d2), cos(i3)*sin(d3); %E = Y
         %             sin(i1),         sin(i2),         sin(i3)];        %D = Z
         function V = computeV(~, d1, i1, d2, i2, d3, i3)
-            V = [cos(i1)*cos(d1), cos(i2)*cos(d2), cos(i3)*cos(d3); %N = X
-                 cos(i1)*sin(d1), cos(i2)*sin(d2), cos(i3)*sin(d3); %E = Y
-                 sin(i1),         sin(i2),         sin(i3)];        %D = Z
+            V = [cosd(i1)*cosd(d1), cosd(i2)*cosd(d2), cosd(i3)*cosd(d3); %N = X
+                 cosd(i1)*sind(d1), cosd(i2)*sind(d2), cosd(i3)*sin(d3); %E = Y
+                 sind(i1),         sind(i2),         sind(i3)];        %D = Z
             threshold = 1e-12;
             V(abs(V) < threshold) = 0;
         end
