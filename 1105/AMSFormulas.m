@@ -334,5 +334,63 @@ classdef AMSFormulas
                 %FK = Kg_final * pinv(Kg_initial);
             %end
         end
+
+        %% ==================== 統計與平均 (Statistics & Averaging) ====================
+        
+        function K_norm = standardizeTensor(K)
+            % 標準化磁感率張量 (Standardize/Normalize Tensor)
+            % 目的：消除標本間磁感率強度的差異，僅保留形狀與方向資訊
+            % 依據：Jelinek (1978)
+            %
+            % 輸入：
+            %   K - 3x3 磁感率張量 (Geographic or Specimen coordinates)
+            %
+            % 輸出：
+            %   K_norm - 標準化後的張量 (每個元素除以平均磁感率)
+            %
+            % 公式：
+            %   k_mean = (K1 + K2 + K3) / 3 = trace(K) / 3
+            %   K_norm = K / k_mean
+            
+            k_mean = trace(K) / 3;
+            
+            % 避免除以零的錯誤
+            if k_mean == 0
+                warning('平均磁感率為 0，無法標準化，回傳原始張量。');
+                K_norm = K;
+            else
+                K_norm = K / k_mean;
+            end
+        end
+        
+        function M = calculateMeanTensor(tensorList)
+            % 計算平均張量 (Mean Tensor)
+            % 目的：計算一組張量的分量平均值
+            %
+            % 輸入：
+            %   tensorList - 3x3xN 矩陣
+            %                (包含 N 個樣本的磁感率張量，需先堆疊成 3D 陣列)
+            %
+            % 輸出：
+            %   M - 3x3 平均張量
+            %
+            % 公式：
+            %   M_ij = (1/N) * sum(K_ij)_n  (對每個分量做算術平均)
+            
+            % 檢查輸入維度
+            if ismatrix(tensorList)
+                if all(size(tensorList) == [3 3])
+                    % 只有傳入一個張量，平均就是自己
+                    M = tensorList;
+                    return;
+                else
+                    error('輸入必須是 3x3xN 的矩陣堆疊 (3D Array)');
+                end
+            end
+            
+            % 沿著第三維度 (樣本數) 取平均
+            M = mean(tensorList, 3);
+        end
     end
 end
+
