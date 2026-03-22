@@ -192,20 +192,28 @@ classdef AMSFormulas
         %% ==================== 幾何計算工具 ====================
         
         function [trend, plunge] = vectorToTrendPlunge(v)
-            % 將單位向量轉換為方位角和傾角
-            %
-            % 輸入：
-            %   v - 3×1 單位向量 [x; y; z] (北、東、下座標系)
-            %
-            % 輸出：
-            %   trend  - 方位角 (度, 0-360°)
-            %   plunge - 傾角 (度, -90° 到 +90°)
+            % 1. 檢查是否指向「天上」(假設 Z 正向是向下，若 v(3) 為負則是指向天)
+            %    或者簡單來說，只要 Plunge 算出來是負的，就反轉向量
             
+            % 先計算傾角
+            plunge = asind(v(3));
+            
+            % 計算方位角
             trend = atan2d(v(2), v(1));
             if trend < 0
                 trend = trend + 360;
             end
-            plunge = asind(v(3));
+            
+            % [新增] 修正邏輯：強制 Plunge 為正 (Lower Hemisphere)
+            if plunge < 0
+                plunge = -plunge;       % 傾角變正
+                trend = trend + 180;    % 方位角反轉 180 度
+                
+                % 確保 Trend 在 0-360 範圍內
+                if trend >= 360
+                    trend = trend - 360;
+                end
+            end
         end
         
         %{
@@ -390,6 +398,155 @@ classdef AMSFormulas
             
             % 沿著第三維度 (樣本數) 取平均
             M = mean(tensorList, 3);
+        end
+        function results = performEigenAnalysis(Tensor)
+            % 執行完整的特徵值分析 (Eigen-analysis)
+            % 目的：從張量中提取主成分 (K1, K2, K3) 及其地理方向 (D, I)
+            %
+            % 輸入：
+            %   Tensor - 3x3 對稱張量 (如 Kg, 平均張量, 或應變張量)
+            %
+            % 輸出：
+            %   results - 包含分析結果的結構體 (Struct)，欄位如下：
+            %       .vals   : [K1, K2, K3] 特徵值陣列 (由大到小)
+            %       .V      : 3x3 特徵向量矩陣 (對應 K1, K2, K3)
+            %       .K1_dir : [Trend, Plunge] K1 的方向
+            %       .K2_dir : [Trend, Plunge] K2 的方向
+            %       .K3_dir : [Trend, Plunge] K3 的方向
+            
+            % 1. 數學分解：計算特徵值與特徵向量 (並排序)
+            [V_sorted, D_sorted] = AMSFormulas.sortedEigenDecomposition(Tensor);
+            
+            % 提取特徵值 (對角線元素)
+            eigenvals = diag(D_sorted);
+            
+            % 2. 地質轉換：將特徵向量轉換為 Trend/Plunge
+            % V_sorted 的每一行 (Column) 代表一個特徵向量
+            [t1, p1] = AMSFormulas.vectorToTrendPlunge(V_sorted(:, 1)); %對應 K1
+            [t2, p2] = AMSFormulas.vectorToTrendPlunge(V_sorted(:, 2)); %對應 K2
+            [t3, p3] = AMSFormulas.vectorToTrendPlunge(V_sorted(:, 3)); %對應 K3
+            
+            % 3. 打包結果
+            results.vals = eigenvals;      % [K1; K2; K3]
+            results.V    = V_sorted;       % 排序後的矩陣
+            
+            results.K1_val = eigenvals(1);
+            results.K1_dir = [t1, p1];     % [Trend, Plunge]
+            
+            results.K2_val = eigenvals(2);
+            results.K2_dir = [t2, p2];
+            
+            results.K3_val = eigenvals(3);
+            results.K3_dir = [t3, p3];
+            
+            % 額外計算一些形狀參數 (Jelinek參數) 方便參考
+            % Pj (Corrected Anisotropy Degree) 等參數可視需求加入
+            % 這裡先提供簡單的 L (Lineation), F (Foliation)
+            if eigenvals(3) > 0
+                results.L = eigenvals(1) / eigenvals(2); % 線理
+                results.F = eigenvals(2) / eigenvals(3); % 葉理
+                results.P = eigenvals(1) / eigenvals(3); % 異向性度
+            else
+                results.L = NaN; results.F = NaN; results.P = NaN;
+            end
+        end
+        %% ==================== 1. Jelinek (1978) 統計分析 ====================
+        function stats = calculateJelinekStats(tensorList)
+            % 計算 Jelinek (1978) 信心橢圓角度 (95%)
+            [~, ~, N] = size(tensorList);
+            
+            if N < 3
+                stats = struct('E12',NaN, 'E23',NaN, 'E13',NaN, 'K1_err',NaN, 'K2_err',NaN, 'K3_err',NaN);
+                return;
+            end
+            
+            % 1. 平均張量與旋轉
+            M = AMSFormulas.calculateMeanTensor(tensorList);
+            [V_mean, D_mean] = AMSFormulas.sortedEigenDecomposition(M);
+            lambda = diag(D_mean); 
+            
+            % 2. 旋轉至主軸座標系並提取分量
+            k_rot_12 = zeros(N,1); k_rot_23 = zeros(N,1); k_rot_13 = zeros(N,1);
+            k_rot_11 = zeros(N,1); k_rot_22 = zeros(N,1); k_rot_33 = zeros(N,1);
+            
+            for i = 1:N
+                K_rot = V_mean' * tensorList(:,:,i) * V_mean;
+                k_rot_12(i) = K_rot(1,2); k_rot_23(i) = K_rot(2,3); k_rot_13(i) = K_rot(1,3);
+                k_rot_11(i) = K_rot(1,1); k_rot_22(i) = K_rot(2,2); k_rot_33(i) = K_rot(3,3);
+            end
+            
+            % 3. 計算變異數與 F 因子 (95% 信心水準)
+            var_12 = sum(k_rot_12.^2) / (N*(N-2));
+            var_23 = sum(k_rot_23.^2) / (N*(N-2));
+            var_13 = sum(k_rot_13.^2) / (N*(N-2));
+            
+            % 簡易 F 值查表近似
+            if N <= 5, F=9.55; elseif N<=10, F=4.46; elseif N<=20, F=3.55; else, F=3.00; end
+            factor = sqrt(2 * F);
+            
+            % 4. 計算信心角度
+            stats.E12 = atand((factor * sqrt(var_12)) / abs(lambda(1)-lambda(2)));
+            stats.E23 = atand((factor * sqrt(var_23)) / abs(lambda(2)-lambda(3)));
+            stats.E13 = atand((factor * sqrt(var_13)) / abs(lambda(1)-lambda(3)));
+            
+            % 5. 數值標準誤
+            stats.K1_err = std(k_rot_11)/sqrt(N);
+            stats.K2_err = std(k_rot_22)/sqrt(N);
+            stats.K3_err = std(k_rot_33)/sqrt(N);
+        end
+
+        %% ==================== 2. Bootstrap 統計分析 ====================
+        function bootStats = calculateBootstrapStats(tensorList, numBootstraps)
+            % 使用 Bootstrap 估算 K 值標準差與方向信心角
+            if nargin < 2, numBootstraps = 1000; end
+            [~, ~, N] = size(tensorList);
+            
+            if N < 3
+                bootStats = struct('K1_std',NaN, 'V1_conf',NaN, 'K3_std',NaN, 'V3_conf',NaN);
+                return;
+            end
+            
+            % 基準方向 (用於校正向量反轉)
+            Mean_Kg = AMSFormulas.calculateMeanTensor(tensorList);
+            [V_ref, ~] = AMSFormulas.sortedEigenDecomposition(Mean_Kg);
+            
+            boot_K = zeros(numBootstraps, 3);
+            boot_V1 = zeros(numBootstraps, 3);
+            boot_V3 = zeros(numBootstraps, 3); % 通常最關心 K1 (線理) 和 K3 (極)
+            
+            for b = 1:numBootstraps
+                indices = randi(N, N, 1);
+                M_b = AMSFormulas.calculateMeanTensor(tensorList(:,:,indices));
+                [V_b, D_b] = AMSFormulas.sortedEigenDecomposition(M_b);
+                
+                boot_K(b,:) = diag(D_b)';
+                
+                % 向量校正
+                v1 = V_b(:,1); if dot(v1, V_ref(:,1)) < 0, v1 = -v1; end
+                v3 = V_b(:,3); if dot(v3, V_ref(:,3)) < 0, v3 = -v3; end
+                boot_V1(b,:) = v1';
+                boot_V3(b,:) = v3';
+            end
+            
+            % 統計結果
+            bootStats.K1_std = std(boot_K(:,1));
+            bootStats.K2_std = std(boot_K(:,2));
+            bootStats.K3_std = std(boot_K(:,3));
+            
+            bootStats.V1_conf = AMSFormulas.calcConfidenceAngle(boot_V1, V_ref(:,1));
+            bootStats.V3_conf = AMSFormulas.calcConfidenceAngle(boot_V3, V_ref(:,3));
+        end
+        
+        function conf_angle = calcConfidenceAngle(boot_vectors, ref_vector)
+            % 計算 95% 信心圓半徑
+            num = size(boot_vectors, 1);
+            angles = zeros(num, 1);
+            for i = 1:num
+                d = dot(boot_vectors(i,:)', ref_vector);
+                angles(i) = acosd(max(min(d, 1), -1));
+            end
+            angles = sort(angles);
+            conf_angle = angles(floor(0.95 * num));
         end
     end
 end

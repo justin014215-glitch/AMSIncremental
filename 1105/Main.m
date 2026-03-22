@@ -9,7 +9,7 @@ clear; clc;
 
 %% ===== 參數設定 =====
 % 1. 指定您的資料檔案名稱
-DATA_FILENAME = 'test.xlsx';
+DATA_FILENAME = 'debby.xlsx';
 
 % 2. 指定要比較的資料行 (Row Index)
 INITIAL_ROW_INDEX = 1;  % <--- 指定初始狀態的「行號」
@@ -20,7 +20,6 @@ FINAL_ROW_INDEX   = 2;  % <--- 指定最終狀態的「行號」
 SLATE_A = 6.897; 
 SLATE_B = 0.007;
 % =========================
-
 %% 1. 載入資料
 try
     data_table = readtable(DATA_FILENAME);

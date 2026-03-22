@@ -9,11 +9,11 @@ clear; clc;
 
 %% ===== 參數設定 =====
 % 1. 指定您的資料檔案名稱
-DATA_FILENAME = 'test.xlsx';
+DATA_FILENAME = 'test0206.xlsx';
 
 % 2. 指定要比較的資料行 (Row Index)
-INITIAL_ROW_INDEX = 2;  % <--- 指定初始狀態的「行號」(北東45度橢圓)
-FINAL_ROW_INDEX   = 3;  % <--- 指定最終狀態的「行號」(北西45度橢圓)
+INITIAL_ROW_INDEX = 1;  % <--- 指定初始狀態的「行號」(北溪45度橢圓)
+FINAL_ROW_INDEX   = 6;  % <--- 指定最終狀態的「行號」(北東45度橢圓)
 % =========================
 
 %% 1. 載入資料
