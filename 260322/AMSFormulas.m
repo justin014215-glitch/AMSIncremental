@@ -81,9 +81,9 @@ classdef AMSFormulas
             %   Eg - 地理座標系應變張量
             %
             % 公式：
-            %   Eg = V' · Er · V
+            %   Eg = V · Er · V'
             
-            Eg = V' * Er * V;
+            Eg = V * Er * V';
         end
         
         
@@ -306,20 +306,20 @@ classdef AMSFormulas
             %   V           - 特徵向量矩陣 (來自 calculateV)
             %
             % 輸出：
-            %   Kg - 3×3 地理座標系磁化率張量
+            %   Kg - 3×3 地理座標系磁感率張量
             %
             % 公式：
             %   K_diag = diag([K1, K2, K3])  (主軸座標系張量)
             %   Kg = V · K_diag · V'          (轉換到地理座標系)
             
-            % 1. 組裝主軸座標系的磁化率張量 (對角矩陣)
+            % 1. 組裝主軸座標系的磁感率張量 (對角矩陣)
             K_diag = diag([K1, K2, K3]);
             
             % 2. 執行座標轉換 (主軸 -> 地理)
             % 注意：標準的張量座標轉換公式為 T_geo = V * T_diag * V'
             % 其中 V 是從主軸到地理的轉換矩陣 (如 calculateV 所計算)
             % V' 是 V 的轉置 (因為 V 是正交的, V' = inv(V))
-            Kg = V * K_diag * V';
+            Kg = V' * K_diag * V;
         end
         
         function FK = calculateFK(Kg_initial, Kg_final)

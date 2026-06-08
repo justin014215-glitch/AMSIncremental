@@ -9,7 +9,7 @@ clear; clc;
 
 %% ===== 參數設定 =====
 % 1. 指定您的資料檔案名稱
-DATA_FILENAME = 'test0206.xlsx';
+DATA_FILENAME = '/Users/lienrueiyu/Desktop/LAB/03collegeproject/01Matlab/260322/test0429.xlsx';
 
 % 2. 指定要比較的資料行 (Row Index)
 INITIAL_ROW_INDEX = 1;  % <--- 指定初始狀態的「行號」(北溪45度橢圓)

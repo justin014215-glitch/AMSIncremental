@@ -11,7 +11,7 @@
 clear; clc; close all;
 
 %% ===== 1. 參數設定 =====
-FILENAME = 'test0206.xlsx';
+FILENAME = 'test0429.xlsx';
 SLATE_A = 6.897; 
 SLATE_B = 0.007;
 

@@ -11,7 +11,7 @@
 clear; clc; close all;
 
 %% ===== 1. 參數設定 =====
-FILENAME = 'Debby_rawdata.xlsx'; 
+FILENAME = '/Users/lienrueiyu/Desktop/LAB/03collegeproject/01Matlab/260322/test0429.xlsx'; 
 
 % Slate 模型參數 (用於將磁感率轉為應變)
 SLATE_A = 6.897; 
