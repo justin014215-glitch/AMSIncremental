@@ -3,9 +3,10 @@
 %
 % 前置需求：先執行 AMS_StrainPrep.m → 產生 groupEg.mat
 %
-% 目前功能：
-%   [模式 1] 選擇任意兩組 Group，計算應變增量 F = Ef2 * Ef1^(-1)
-%   [模式 2] 依分區(A/B/C/D)計算應變增量 ← 分區代表值計算方式待定
+% 模式 1：手選任意兩組，計算單一增量
+% 模式 2：依分區 (A/B/C/D) 自動分組，可選擇計算「單一分區內部連續增量」或「相鄰分區對連續增量」
+% 模式 3：從 No.1 連續計算到最後一個樣本（1→2, 2→3 … n-1→n）
+%          所有增量主軸畫在同一張 stereonet，並輸出彙整 Excel
 %
 % 依賴：AMSFormulas.m
 % =========================================================
@@ -25,361 +26,411 @@ nGroups = size(groupEg, 3);
 fprintf('已載入 %d 組 Eg 張量\n', nGroups);
 
 % 顯示各組資訊
-fprintf('\n%-8s %-12s %-12s %-12s  %-18s\n', ...
-    'Number', 'Eg_e1', 'Eg_e2', 'Eg_e3', 'Sample_Names');
-fprintf('%s\n', repmat('-', 1, 70));
+fprintf('\n%-8s %-6s %-12s %-12s %-12s  %-18s\n', ...
+    'Number','Group','Eg_e1','Eg_e2','Eg_e3','Sample_Names');
+fprintf('%s\n', repmat('-',1,78));
 for g = 1:nGroups
     EgRes = AMSFormulas.performEigenAnalysis(groupEg(:,:,g));
-    name_str = '';
-    if isfield(results, 'SampleNames') && g <= numel(results.SampleNames)
-        name_str = results.SampleNames{g};
+    nm = '';
+    if isfield(results,'SampleNames') && g<=numel(results.SampleNames)
+        nm = results.SampleNames{g};
     end
-    fprintf('%-8d %-12.6f %-12.6f %-12.6f  %s\n', ...
-        groupNums(g), EgRes.K1_val, EgRes.K2_val, EgRes.K3_val, name_str);
+    gl = '';
+    if isfield(results,'GroupLabel') && g<=numel(results.GroupLabel)
+        gl = results.GroupLabel{g};
+    end
+    fprintf('%-8d %-6s %-12.6f %-12.6f %-12.6f  %s\n', ...
+        groupNums(g), gl, EgRes.K1_val, EgRes.K2_val, EgRes.K3_val, nm);
 end
 fprintf('\n');
 
 %% -------- 2. 選擇計算模式 ----------------------------------------
-modeChoice = questdlg('選擇計算模式', '應變增量模式', ...
-    '模式1：選兩個樣本', '模式2：依分區(A/B/C/D)', '模式1：選兩個樣本');
+modeChoice = questdlg('選擇計算模式','應變增量模式', ...
+    '模式1：選兩個樣本', ...
+    '模式2：依分區(A/B/C/D)', ...
+    '模式3：連續增量(1→2→…→n)', ...
+    '模式3：連續增量(1→2→…→n)');
 
 if isempty(modeChoice), disp('已取消'); return; end
 
 %% ================================================================
-%  模式 1：選擇任意兩個 Group 計算應變增量
+%  模式 1：手選兩組
 %% ================================================================
-if strcmp(modeChoice, '模式1：選兩個樣本')
+if strcmp(modeChoice,'模式1：選兩個樣本')
 
-    keepGoing    = true;
+    keepGoing = true;
     allPairResults = {};
 
     while keepGoing
         fprintf('\n--- 配對 #%d ---\n', numel(allPairResults)+1);
+        numList = arrayfun(@(x) num2str(x), groupNums, 'UniformOutput',false);
 
-        % 選擇初始 Group（Ef1）
-        numList = arrayfun(@(x) num2str(x), groupNums, 'UniformOutput', false);
-        [idx1, ok] = listdlg( ...
-            'PromptString', '選擇初始狀態 Group（Ef1，較早期/西側）：', ...
-            'SelectionMode', 'single', ...
-            'ListString', numList, ...
-            'Name', '選擇 Ef1');
-        if ~ok, fprintf('已取消\n'); break; end
+        [idx1,ok] = listdlg('PromptString','選擇初始狀態 Ef1：', ...
+            'SelectionMode','single','ListString',numList,'Name','選擇 Ef1');
+        if ~ok, break; end
+        [idx2,ok] = listdlg('PromptString','選擇最終狀態 Ef2：', ...
+            'SelectionMode','single','ListString',numList,'Name','選擇 Ef2');
+        if ~ok, break; end
 
-        % 選擇最終 Group（Ef2）
-        [idx2, ok] = listdlg( ...
-            'PromptString', '選擇最終狀態 Group（Ef2，較晚期/東側）：', ...
-            'SelectionMode', 'single', ...
-            'ListString', numList, ...
-            'Name', '選擇 Ef2');
-        if ~ok, fprintf('已取消\n'); break; end
+        pairRes = computeIncrement(groupEg(:,:,idx1), groupEg(:,:,idx2), ...
+            groupNums(idx1), groupNums(idx2));
+        allPairResults{end+1} = pairRes;
 
-        num1 = groupNums(idx1);
-        num2 = groupNums(idx2);
-        Ef1  = groupEg(:,:,idx1);
-        Ef2  = groupEg(:,:,idx2);
-
-        pairRes = computeIncrementalStrain(Ef1, Ef2, num1, num2);
-        allPairResults{end+1} = pairRes; %#ok<AGROW>
-
-        cont = questdlg('是否再計算一組配對？', '繼續？', '繼續', '結束', '結束');
-        if strcmp(cont, '結束'), keepGoing = false; end
+        cont = questdlg('是否再計算一組？','繼續？','繼續','結束','結束');
+        if strcmp(cont,'結束'), keepGoing=false; end
     end
 
     if ~isempty(allPairResults)
         outputResults(allPairResults, matPath, 'PairResults');
     end
-
-end % 模式 1
+end
 
 %% ================================================================
-%  模式 2：依分區(A/B/C/D)計算應變增量
-%  ⚠ 各分區代表 Eg 的計算方式尚未決定，目前以分量平均佔位
+%  模式 2：依分區 A/B/C/D — 連續增量（可選單一分區內部 或 跨分區）
 %% ================================================================
-if strcmp(modeChoice, '模式2：依分區(A/B/C/D)')
+if strcmp(modeChoice,'模式2：依分區(A/B/C/D)')
 
     fprintf('\n============================\n');
-    fprintf('  模式 2：依分區計算應變增量\n');
+    fprintf('  模式 2：依分區連續應變增量\n');
     fprintf('============================\n');
-    fprintf('⚠  各分區代表 Eg 目前以「分量平均」計算，待確認後修改 calcSectionRepEg()\n\n');
 
-    %% ---- 2a. 設定各分區包含的 Group Numbers --------------------
-    % ⚠ 請依彭筱君(2015)分區結果填入對應 Number
-    % 若保持空陣列 []，程式會彈出對話框讓你手動輸入
-    sectionGroups.A = [];   % 例如 [1, 2, 3]
-    sectionGroups.B = [];   % 例如 [4, 5, 6]
-    sectionGroups.C = [];   % 例如 [7, 8, 9]
-    sectionGroups.D = [];   % 例如 [10, 11, 12]
+    % ---- 從 results.GroupLabel 自動建立分區索引 -----------------
+    if ~isfield(results,'GroupLabel')
+        errordlg('results 中找不到 GroupLabel 欄位，請重新執行 AMS_StrainPrep','欄位缺失');
+        return;
+    end
 
-    sections = {'A','B','C','D'};
-    for s = 1:4
-        secName = sections{s};
-        if isempty(sectionGroups.(secName))
-            ans_str = inputdlg( ...
-                {sprintf('區段 %s 包含的 Group Numbers（空格分隔，可留空跳過）：', secName)}, ...
-                sprintf('設定區段 %s', secName), 1, {''});
-            if ~isempty(ans_str) && ~isempty(strtrim(ans_str{1}))
-                sectionGroups.(secName) = str2num(ans_str{1}); %#ok<ST2NM>
+    cleanLabels = cellfun(@(s) normalizeGroupStr(s), results.GroupLabel, ...
+        'UniformOutput', false);
+
+    % 找出實際存在的分區（依 A B C D 順序）
+    validSections = {};
+    for s = {'A','B','C','D'}
+        sn = s{1};
+        if any(strcmp(cleanLabels, sn))
+            validSections{end+1} = sn; 
+        end
+    end
+
+    if isempty(validSections)
+        errordlg('未找到任何有效分區','分區不足');
+        return;
+    end
+
+    % 建立每個分區的站點清單（依 Number 升序排列）
+    sectionNums = struct();
+    fprintf('\n各分區站點（依 Number 排序）：\n');
+    for s = 1:numel(validSections)
+        sn   = validSections{s};
+        mask = strcmp(cleanLabels, sn);
+        nums = sort(groupNums(mask), 'ascend');
+        sectionNums.(sn) = nums;
+        fprintf('  分區 %s：No.%s（共 %d 站）\n', sn, ...
+            strjoin(arrayfun(@num2str,nums,'UniformOutput',false),', '), numel(nums));
+    end
+
+    % ---- 動態選單組合：同時提供「單一分區內部」與「跨分區」選項 -----
+    menuOptions = {};
+    
+    % 1. 先加入單一分區內部連續增量選項
+    for s = 1:numel(validSections)
+        sn = validSections{s};
+        if numel(sectionNums.(sn)) >= 2
+            menuOptions{end+1} = sprintf('僅分區 %s 內部連續', sn); %#ok<AGROW>
+        end
+    end
+    
+    % 2. 再加入跨相鄰分區的選項
+    for s = 1:numel(validSections)-1
+        menuOptions{end+1} = sprintf('%s → %s', ...
+            validSections{s}, validSections{s+1}); %#ok<AGROW>
+    end
+
+    [pairSel, ok] = listdlg( ...
+        'PromptString', '選擇要計算的連續類型（可多選）：', ...
+        'SelectionMode', 'multiple', ...
+        'ListString',    menuOptions, ...
+        'Name',          '選擇計算分區', ...
+        'ListSize',      [280 220]);
+    if ~ok, disp('已取消'); return; end
+
+    selectedOptions = menuOptions(pairSel);
+
+    % ---- 開始針對選定的選項進行計算與合圖 -------------------------
+    for so = 1:numel(selectedOptions)
+        currentOpt = selectedOptions{so};
+        
+        if startsWith(currentOpt, '僅分區')
+            %% --- 狀況 A：只看單個分區內部的疊加 ---
+            % 提取分區字母，例如從 '僅分區 A 內部連續' 拿掉字串取得 'A'
+            sA = extractBetween(currentOpt, "僅分區 ", " 內部連續");
+            sA = sA{1};
+            sB = ''; % 單一分區沒有終點分區
+            
+            seqNums = sectionNums.(sA);
+            nSeq    = numel(seqNums);
+            tag     = sprintf('Sec_%s_Internal', sA);
+            
+            fprintf('\n====== 僅分區 %s 內部連續（共 %d 個增量）======\n', sA, nSeq-1);
+            
+        else
+            %% --- 狀況 B：原本的 A → B 跨分區連續 ---
+            parts = strsplit(currentOpt, ' → ');
+            sA = parts{1};   
+            sB = parts{2};   
+
+            numsA = sectionNums.(sA);
+            numsB = sectionNums.(sB);
+
+            % 拼接 A+B
+            seqNums = [numsA(:); numsB(:)];
+            nSeq    = numel(seqNums);
+            tag     = sprintf('Sec_%s_to_%s', sA, sB);
+            
+            fprintf('\n====== 分區對 %s → %s（共 %d 個增量）======\n', sA, sB, nSeq-1);
+        end
+
+        if nSeq < 2
+            fprintf('站點不足，跳過：%s\n', currentOpt);
+            continue;
+        end
+
+        % 逐對計算增量
+        seqResults = cell(nSeq-1, 1);
+        for p = 1:nSeq-1
+            n1   = seqNums(p);
+            n2   = seqNums(p+1);
+            idx1 = find(groupNums == n1, 1);
+            idx2 = find(groupNums == n2, 1);
+            if isempty(idx1)||isempty(idx2)
+                continue;
+            end
+
+            % 計算增量
+            seqResults{p} = computeIncrement(groupEg(:,:,idx1), groupEg(:,:,idx2), n1, n2);
+            
+            % 判斷是否為跨分區（只有在兩者皆存在且標籤不同時才是跨分區）
+            g1 = cleanLabels{groupNums==n1};
+            g2 = cleanLabels{groupNums==n2};
+            if ~strcmp(g1, g2)
+                seqResults{p}.label   = [seqResults{p}.label ' *'];
+                seqResults{p}.isCross = true;
+            else
+                seqResults{p}.isCross = false;
             end
         end
-    end
 
-    %% ---- 2b. 計算各分區代表 Eg ----------------------------------
-    sectionEg    = struct();
-    sectionValid = struct();
-
-    for s = 1:4
-        secName = sections{s};
-        nums    = sectionGroups.(secName);
-
-        if isempty(nums)
-            fprintf('區段 %s：未設定，跳過\n', secName);
-            sectionValid.(secName) = false;
-            continue;
-        end
-
-        [Eg_rep, ok] = calcSectionRepEg(nums, groupNums, groupEg);
-
-        if ok
-            sectionEg.(secName)    = Eg_rep;
-            sectionValid.(secName) = true;
-            EgRes = AMSFormulas.performEigenAnalysis(Eg_rep);
-            fprintf('區段 %s (Groups: %s)  Eg_e1=%.6f  e3=%.6f\n', ...
-                secName, num2str(nums), EgRes.K1_val, EgRes.K3_val);
-        else
-            fprintf('區段 %s：Group 不存在，跳過\n', secName);
-            sectionValid.(secName) = false;
+        % 移除空資料並輸出
+        seqResults = seqResults(~cellfun(@isempty, seqResults));
+        if ~isempty(seqResults)
+            outputResults(seqResults, matPath, tag, sA, sB);
         end
     end
+end
 
-    %% ---- 2c. 計算相鄰分區間應變增量 ----------------------------
-    pairs = {'A','B'; 'B','C'; 'C','D'; 'A','D'};
-    pairResults2 = {};
+%% ================================================================
+%  模式 3：連續增量 1→2→3→…→n
+%% ================================================================
+if strcmp(modeChoice,'模式3：連續增量(1→2→…→n)')
 
-    for p = 1:size(pairs, 1)
-        s1 = pairs{p,1};  s2 = pairs{p,2};
-        if ~sectionValid.(s1) || ~sectionValid.(s2)
-            fprintf('配對 %s→%s：資料不足，跳過\n', s1, s2);
-            continue;
-        end
-        label   = sprintf('%s→%s', s1, s2);
-        pairRes = computeIncrementalStrain( ...
-            sectionEg.(s1), sectionEg.(s2), s1, s2, label);
-        pairResults2{end+1} = pairRes; %#ok<AGROW>
+    fprintf('\n============================\n');
+    fprintf('  模式 3：連續應變增量\n');
+    fprintf('============================\n\n');
+
+    if nGroups < 2
+        errordlg('至少需要 2 組資料','資料不足'); return;
     end
 
-    if ~isempty(pairResults2)
-        outputResults(pairResults2, matPath, 'SectionResults');
-        % 額外記錄分區設定
-        outputFile = fullfile(matPath, 'IncrementalStrain_SectionResults.xlsx');
-        sNames = {}; sNums = {};
-        for s = 1:4
-            sn = sections{s};
-            sNames{end+1} = sn; %#ok<AGROW>
-            sNums{end+1}  = num2str(sectionGroups.(sn)); %#ok<AGROW>
+    [sortedNums, sortIdx] = sort(groupNums, 'ascend');
+    nPairs = nGroups - 1;
+
+    fprintf('計算順序：');
+    for g = 1:nGroups
+        if g < nGroups, fprintf('No.%d → ', sortedNums(g));
+        else,           fprintf('No.%d\n', sortedNums(g));
         end
-        writetable( ...
-            table(sNames', sNums', 'VariableNames', {'Section','Group_Numbers'}), ...
-            outputFile, 'Sheet', 'SectionDefinition');
+    end
+    fprintf('\n');
+
+    seqResults = cell(nPairs,1);
+    for p = 1:nPairs
+        g1 = sortIdx(p);
+        g2 = sortIdx(p+1);
+        seqResults{p} = computeIncrement( ...
+            groupEg(:,:,g1), groupEg(:,:,g2), ...
+            groupNums(g1), groupNums(g2));
     end
 
-end % 模式 2
+    outputResults(seqResults, matPath, 'SeqResults');
+end
 
 disp('程式執行完畢。');
 
 
 %% ================================================================
-%  核心計算函式
+%  核心計算
 %% ================================================================
-
-function res = computeIncrementalStrain(Ef1, Ef2, label1, label2, label)
-% 計算應變增量 F = Ef2 * Ef1^(-1) 並做特徵值分析
-%
-% F 一般非對稱（含旋轉），此處取對稱部分做特徵值分析
-% 若後續要分析旋轉成分可用 F 直接做極分解
-
-    if nargin < 5
-        label = sprintf('%s → %s', num2str(label1), num2str(label2));
-    end
-
+function res = computeIncrement(Ef1, Ef2, label1, label2)
+    label = sprintf('No.%s → No.%s', num2str(label1), num2str(label2));
     fprintf('\n[%s]\n', label);
 
-    % 計算增量
-    F     = AMSFormulas.calculateF(Ef1, Ef2);   % F = Ef2 * Ef1^(-1)
-    F_sym = AMSFormulas.symmetrize(F);           % 取對稱部分
-
-    % 特徵值分析
+    F     = AMSFormulas.calculateF(Ef1, Ef2);
+    F_sym = AMSFormulas.symmetrize(F);
     FRes  = AMSFormulas.performEigenAnalysis(F_sym);
 
-    % 形狀參數 T
     T_val = NaN;
-    if all([FRes.K1_val, FRes.K2_val, FRes.K3_val] > 0)
-        lnR1 = log(FRes.K1_val / FRes.K2_val);
-        lnR2 = log(FRes.K2_val / FRes.K3_val);
-        if (lnR1 + lnR2) ~= 0
-            T_val = (lnR2 - lnR1) / (lnR2 + lnR1);
+    if all([FRes.K1_val FRes.K2_val FRes.K3_val] > 0)
+        lnR1 = log(FRes.K1_val/FRes.K2_val);
+        lnR2 = log(FRes.K2_val/FRes.K3_val);
+        if (lnR1+lnR2) ~= 0
+            T_val = (lnR2-lnR1)/(lnR2+lnR1);
         end
     end
 
-    % 輸出
-    fprintf('  det(F) = %.6f（體積守恆應 ≈ 1）\n', det(F));
-    fprintf('  增量主應變：\n');
-    fprintf('    e1 = %10.6f  Trend/Plunge: %6.1f / %5.1f\n', ...
-        FRes.K1_val, FRes.K1_dir(1), FRes.K1_dir(2));
-    fprintf('    e2 = %10.6f  Trend/Plunge: %6.1f / %5.1f\n', ...
-        FRes.K2_val, FRes.K2_dir(1), FRes.K2_dir(2));
-    fprintf('    e3 = %10.6f  Trend/Plunge: %6.1f / %5.1f\n', ...
-        FRes.K3_val, FRes.K3_dir(1), FRes.K3_dir(2));
-    if ~isnan(T_val)
-        shape = '中性';
-        if T_val >  0.1, shape = 'Oblate 扁平狀';
-        elseif T_val < -0.1, shape = 'Prolate 雪茄狀'; end
-        fprintf('  L=%.4f  F=%.4f  T=%.4f  (%s)\n', FRes.L, FRes.F, T_val, shape);
-    end
-
-    % 打包
-    res.label  = label;
-    res.label1 = label1;
-    res.label2 = label2;
-    res.F      = F;
-    res.F_sym  = F_sym;
-    res.FRes   = FRes;
-    res.T_val  = T_val;
-    res.detF   = det(F);
+    fprintf('  det(F)=%.6f  e1=%.6f  e2=%.6f  e3=%.6f\n', ...
+        det(F), FRes.K1_val, FRes.K2_val, FRes.K3_val);
+    fprintf('  e1: %5.1f°/%4.1f°    e3: %5.1f°/%4.1f°\n', ...
+        FRes.K1_dir(1),FRes.K1_dir(2), FRes.K3_dir(1),FRes.K3_dir(2));
+    
+    res.label   = label;
+    res.label1  = label1;
+    res.label2  = label2;
+    res.F       = F;
+    res.F_sym   = F_sym;
+    res.FRes    = FRes;
+    res.T_val   = T_val;
+    res.detF    = det(F);
+    res.isCross = false;
 end
 
 
-function [Eg_rep, ok] = calcSectionRepEg(nums, groupNums, groupEg)
-% ⚠ 各分區代表 Eg 計算（目前：分量平均）
-% 待確認後可改為其他方法：
-%   - 選取代表性單一樣本
-%   - 加權平均
-%   - bootstrap 中位張量
-
-    tensorStack = [];
-    count = 0;
-    for i = 1:numel(nums)
-        gIdx = find(groupNums == nums(i));
-        if isempty(gIdx)
-            warning('Group %d 不存在，跳過', nums(i));
-            continue;
+function s = normalizeGroupStr(s)
+    s = strtrim(strrep(s, '''', ''));
+    for c = 1:numel(s)
+        code = double(s(c));
+        if code >= 65313 && code <= 65338   
+            s(c) = char(code - 65248);
         end
-        count = count + 1;
-        tensorStack(:,:,count) = groupEg(:,:,gIdx); %#ok<AGROW>
-    end
-
-    if count == 0
-        Eg_rep = nan(3,3); ok = false;
-    elseif count == 1
-        Eg_rep = tensorStack(:,:,1); ok = true;
-    else
-        % ⚠ 目前：分量平均（待確認）
-        Eg_rep = mean(tensorStack, 3);
-        Eg_rep = AMSFormulas.symmetrize(Eg_rep);
-        ok = true;
     end
 end
 
 
 %% ================================================================
-%  輸出函式
+%  輸出（Excel + 合圖 stereonet）
 %% ================================================================
-
-function outputResults(pairResults, matPath, tag)
-% 彙整輸出 Excel、.mat、Stereonet
-
+function outputResults(pairResults, matPath, tag, sectionA, sectionB)
     nP = numel(pairResults);
 
-    % 組裝 Table
-    Label     = cellfun(@(r) r.label,            pairResults, 'UniformOutput', false)';
-    Ef1_ID    = cellfun(@(r) num2str(r.label1),  pairResults, 'UniformOutput', false)';
-    Ef2_ID    = cellfun(@(r) num2str(r.label2),  pairResults, 'UniformOutput', false)';
-    det_F     = cellfun(@(r) r.detF,             pairResults)';
-    F_e1      = cellfun(@(r) r.FRes.K1_val,      pairResults)';
-    F_e2      = cellfun(@(r) r.FRes.K2_val,      pairResults)';
-    F_e3      = cellfun(@(r) r.FRes.K3_val,      pairResults)';
-    e1_Trend  = cellfun(@(r) r.FRes.K1_dir(1),   pairResults)';
-    e1_Plunge = cellfun(@(r) r.FRes.K1_dir(2),   pairResults)';
-    e2_Trend  = cellfun(@(r) r.FRes.K2_dir(1),   pairResults)';
-    e2_Plunge = cellfun(@(r) r.FRes.K2_dir(2),   pairResults)';
-    e3_Trend  = cellfun(@(r) r.FRes.K3_dir(1),   pairResults)';
-    e3_Plunge = cellfun(@(r) r.FRes.K3_dir(2),   pairResults)';
-    L_val     = cellfun(@(r) r.FRes.L,           pairResults)';
-    F_val     = cellfun(@(r) r.FRes.F,           pairResults)';
-    T_shape   = cellfun(@(r) r.T_val,            pairResults)';
+    C1=[0.12 0.47 0.71]; C1e=[0.05 0.25 0.50];
+    C2=[0.17 0.63 0.17]; C2e=[0.05 0.38 0.05];
+    C3=[0.84 0.15 0.16]; C3e=[0.55 0.05 0.05];
 
-    T = table(Label, Ef1_ID, Ef2_ID, det_F, ...
-        F_e1, F_e2, F_e3, ...
-        e1_Trend, e1_Plunge, e2_Trend, e2_Plunge, e3_Trend, e3_Plunge, ...
-        L_val, F_val, T_shape, ...
-        'VariableNames', { ...
+    if nargin < 4, sectionA=''; sectionB=''; end
+
+    %% --- Excel 輸出 -------------------------------------------
+    Label     = cellfun(@(r) r.label,            pairResults,'UniformOutput',false)';
+    Ef1_ID    = cellfun(@(r) num2str(r.label1), pairResults,'UniformOutput',false)';
+    Ef2_ID    = cellfun(@(r) num2str(r.label2), pairResults,'UniformOutput',false)';
+    det_F     = cellfun(@(r) r.detF,            pairResults)';
+    F_e1      = cellfun(@(r) r.FRes.K1_val,     pairResults)';
+    F_e2      = cellfun(@(r) r.FRes.K2_val,     pairResults)';
+    F_e3      = cellfun(@(r) r.FRes.K3_val,     pairResults)';
+    e1_Trend  = cellfun(@(r) r.FRes.K1_dir(1),  pairResults)';
+    e1_Plunge = cellfun(@(r) r.FRes.K1_dir(2),  pairResults)';
+    e2_Trend  = cellfun(@(r) r.FRes.K2_dir(1),  pairResults)';
+    e2_Plunge = cellfun(@(r) r.FRes.K2_dir(2),  pairResults)';
+    e3_Trend  = cellfun(@(r) r.FRes.K3_dir(1),  pairResults)';
+    e3_Plunge = cellfun(@(r) r.FRes.K3_dir(2),  pairResults)';
+    L_val     = cellfun(@(r) r.FRes.L,          pairResults)';
+    Fv_val    = cellfun(@(r) r.FRes.F,          pairResults)';
+    T_shape   = cellfun(@(r) r.T_val,           pairResults)';
+
+    T = table(Label,Ef1_ID,Ef2_ID,det_F, ...
+        F_e1,F_e2,F_e3, ...
+        e1_Trend,e1_Plunge,e2_Trend,e2_Plunge,e3_Trend,e3_Plunge, ...
+        L_val,Fv_val,T_shape, ...
+        'VariableNames',{ ...
         'Label','Ef1_ID','Ef2_ID','det_F', ...
         'F_e1','F_e2','F_e3', ...
         'e1_Trend','e1_Plunge','e2_Trend','e2_Plunge','e3_Trend','e3_Plunge', ...
         'L_lineation','F_foliation','T_shape'});
 
-    outputFile = fullfile(matPath, ['IncrementalStrain_' tag '.xlsx']);
-    writetable(T, outputFile, 'Sheet', tag);
-    fprintf('\nExcel 已輸出：%s\n', outputFile);
+    xlsFile = fullfile(matPath, ['IncrementalStrain_' tag '.xlsx']);
+    writetable(T, xlsFile, 'Sheet', tag);
+    fprintf('\nExcel 輸出：%s\n', xlsFile);
+    save(fullfile(matPath,['IncrementalStrain_' tag '.mat']), 'pairResults');
 
-    % .mat
-    save(fullfile(matPath, ['IncrementalStrain_' tag '.mat']), 'pairResults');
-
-    % Stereonet
+    %% --- 儲存路徑 ---------------------------------------------
     stereoDir = fullfile(matPath, ['IncrementalStereonets_' tag]);
-    if ~exist(stereoDir, 'dir'), mkdir(stereoDir); end
+    if ~exist(stereoDir,'dir'), mkdir(stereoDir); end
+
+    %% --- 繪製立體投影網圖 ---------------------------------------
+    if ~isempty(sectionA) && ~isempty(sectionB)
+        figTitle = sprintf('應變增量  %s → %s（共 %d 個增量）', sectionA, sectionB, nP);
+    elseif ~isempty(sectionA) && isempty(sectionB)
+        figTitle = sprintf('應變增量  分區 %s 內部連續（共 %d 個增量）', sectionA, nP);
+    else
+        figTitle = sprintf('應變增量合圖（共 %d 對）', nP);
+    end
+
+    fig = figure('Name', figTitle, 'Color','white', 'Position',[150 150 700 720]);
+    Stereonet(0, pi/2, 10*pi/180, 1);
+    ax = gca; hold(ax,'on');
 
     for p = 1:nP
         res  = pairResults{p};
         FRes = res.FRes;
+        lbl  = res.label;
 
-        figure('Name', ['應變增量 - ' res.label], ...
-               'Color', 'white', 'Position', [100 100 650 650]);
-        Stereonet(0, pi/2, 10*pi/180, 1);
-        ax = gca; hold(ax, 'on');
+        isCross = isfield(res,'isCross') && res.isCross;
+        if isCross
+            faceC1='none'; faceC2='none'; faceC3='none';
+            lw = 1.8;
+        else
+            faceC1=C1; faceC2=C2; faceC3=C3;
+            lw = 1.2;
+        end
 
         [x1,y1] = schmidtProject(FRes.K1_dir(1), FRes.K1_dir(2));
-        plot(ax, x1, y1, 's', 'MarkerFaceColor', [0.12 0.47 0.71], ...
-            'MarkerEdgeColor', [0.05 0.25 0.50], 'MarkerSize', 14, 'LineWidth', 1.5);
-        text(ax, x1+0.05, y1+0.05, sprintf('e1=%.4f', FRes.K1_val), ...
-            'FontSize', 9, 'Color', [0.12 0.47 0.71]);
+        plot(ax,x1,y1,'s','MarkerFaceColor',faceC1,'MarkerEdgeColor',C1e, 'MarkerSize',13,'LineWidth',lw);
+        text(ax,x1+0.04,y1+0.03, lbl, 'FontSize',7,'Color',C1e);
 
         [x2,y2] = schmidtProject(FRes.K2_dir(1), FRes.K2_dir(2));
-        plot(ax, x2, y2, '^', 'MarkerFaceColor', [0.17 0.63 0.17], ...
-            'MarkerEdgeColor', [0.05 0.38 0.05], 'MarkerSize', 14, 'LineWidth', 1.5);
+        plot(ax,x2,y2,'^','MarkerFaceColor',faceC2,'MarkerEdgeColor',C2e, 'MarkerSize',13,'LineWidth',lw);
 
         [x3,y3] = schmidtProject(FRes.K3_dir(1), FRes.K3_dir(2));
-        plot(ax, x3, y3, 'o', 'MarkerFaceColor', [0.84 0.15 0.16], ...
-            'MarkerEdgeColor', [0.55 0.05 0.05], 'MarkerSize', 14, 'LineWidth', 1.5);
-        text(ax, x3+0.05, y3+0.05, sprintf('e3=%.4f', FRes.K3_val), ...
-            'FontSize', 9, 'Color', [0.84 0.15 0.16]);
-
-        h1 = plot(ax, NaN, NaN, 's', 'MarkerFaceColor', [0.12 0.47 0.71], ...
-            'MarkerEdgeColor',[0.05 0.25 0.50], 'MarkerSize', 12, ...
-            'DisplayName', 'e_1 (max extension)');
-        h2 = plot(ax, NaN, NaN, '^', 'MarkerFaceColor', [0.17 0.63 0.17], ...
-            'MarkerEdgeColor',[0.05 0.38 0.05], 'MarkerSize', 12, ...
-            'DisplayName', 'e_2');
-        h3 = plot(ax, NaN, NaN, 'o', 'MarkerFaceColor', [0.84 0.15 0.16], ...
-            'MarkerEdgeColor',[0.55 0.05 0.05], 'MarkerSize', 12, ...
-            'DisplayName', 'e_3 (max shortening)');
-        legend(ax, [h1 h2 h3], 'Location', 'southoutside', ...
-            'Orientation', 'horizontal', 'FontSize', 10);
-
-        title(ax, sprintf('應變增量 — %s\nT=%.3f  det(F)=%.4f', ...
-            res.label, res.T_val, res.detF), ...
-            'FontSize', 12, 'FontWeight', 'bold');
-        axis(ax, 'off'); hold(ax, 'off');
-
-        fname = sprintf('IncrementalStrain_%s_%s.png', tag, ...
-            strrep(strrep(res.label, '→', 'to'), ' ', ''));
-        exportgraphics(gcf, fullfile(stereoDir, fname), 'Resolution', 300);
-        fprintf('Stereonet saved: %s\n', fname);
+        plot(ax,x3,y3,'o','MarkerFaceColor',faceC3,'MarkerEdgeColor',C3e, 'MarkerSize',13,'LineWidth',lw);
     end
-    fprintf('圖檔已儲存至：%s\n', stereoDir);
+
+    %% --- 圖例優化 (不寫顏色) -----------------------------------
+    h1=plot(ax,NaN,NaN,'s','MarkerFaceColor',C1,'MarkerEdgeColor',C1e, 'MarkerSize',13,'DisplayName','e_1');
+    h2=plot(ax,NaN,NaN,'^','MarkerFaceColor',C2,'MarkerEdgeColor',C2e, 'MarkerSize',13,'DisplayName','e_2');
+    h3=plot(ax,NaN,NaN,'o','MarkerFaceColor',C3,'MarkerEdgeColor',C3e, 'MarkerSize',13,'DisplayName','e_3');
+
+    hasCross = any(cellfun(@(r) isfield(r,'isCross')&&r.isCross, pairResults));
+    if hasCross
+        hx=plot(ax,NaN,NaN,'s','MarkerFaceColor','none','MarkerEdgeColor',C1e, 'MarkerSize',13,'LineWidth',1.8,'DisplayName','跨分區增量');
+        legend(ax,[h1 h2 h3 hx],'Location','southoutside', 'Orientation','horizontal','FontSize',10);
+    else
+        legend(ax,[h1 h2 h3],'Location','southoutside', 'Orientation','horizontal','FontSize',10);
+    end
+
+    title(ax, figTitle, 'FontSize',12,'FontWeight','bold');
+    annotation('textbox',[0.12 0.01 0.76 0.04], ...
+        'String','Lower hemisphere, equal-area projection (Schmidt Net)', ...
+        'EdgeColor','none','FontSize',7,'Color',[0.5 0.5 0.5], 'HorizontalAlignment','center');
+    axis(ax,'off'); hold(ax,'off');
+
+    fname = sprintf('IncrementAll_%s.png', tag);
+    exportgraphics(fig, fullfile(stereoDir,fname), 'Resolution',300);
+    fprintf('合圖 saved → %s\n', fullfile(stereoDir,fname));
 end
 
 
-function [x, y] = schmidtProject(trend_deg, plunge_deg)
+%% ================================================================
+%  幾何工具
+%% ================================================================
+function [x,y] = schmidtProject(trend_deg, plunge_deg)
     r = sqrt(2) * sin((pi/2 - deg2rad(plunge_deg)) / 2);
     x = r * sin(deg2rad(trend_deg));
     y = r * cos(deg2rad(trend_deg));

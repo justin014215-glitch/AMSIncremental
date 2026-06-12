@@ -38,10 +38,11 @@ classdef AMSFormulas
             e1 = exp(slateA * ((K1/K0) - 1) - slateB) - 1;
             e2 = exp(slateA * ((K2/K0) - 1) - slateB) - 1;
             e3 = exp(slateA * ((K3/K0) - 1) - slateB) - 1;
-            
-            omega = (1 + e1) * (1 + e2) * (1 + e3);
-            
-            Er = omega^2 * diag([(1+e1)^-2, (1+e2)^-2, (1+e3)^-2]);
+
+            Er = diag([1+e1, (1+e2), (1+e3)]);
+            %omega = (1 + e1) * (1 + e2) * (1 + e3);
+             
+            %Er = omega^2 * diag([(1+e1)^-2, (1+e2)^-2, (1+e3)^-2]);
         end
         
         

@@ -132,7 +132,6 @@ else
             if opt.ShowLabels
                 lbl = sprintf('No.%d', thisNum);
                 addLabel(ax, dK1(r),iK1(r), lbl, C1*0.65, 5);
-                addLabel(ax, dK2(r),iK2_all(r), lbl, C1*0.65, 5);
                 addLabel(ax, dK3(r),iK3(r), lbl, C3*0.65, 5);
             end
         end
@@ -419,11 +418,7 @@ function closeFigure(ax, titleStr, dataTag, opt, C1,C1e,C2,C2e,C3,C3e)
         end
     end
 
-    lgd = legend(ax, handles, ...
-    'NumColumns', 4, ...        % 每排 4 個，超過自動換行
-    'FontSize', 9);
-    lgd.Location = 'southoutside';
-    lgd.Position(1) = (1 - lgd.Position(3)) / 2;
+    legend(ax,handles,'Location','southoutside','Orientation','horizontal','FontSize',9);
     title(ax,titleStr,'FontSize',13,'FontWeight','bold');
     annotation('textbox',[0.12 0.01 0.76 0.04], ...
         'String','Lower hemisphere, equal-area projection (Schmidt Net)', ...
@@ -541,57 +536,72 @@ function bc = calcBootstrap(tensorStack, nBoot)
 end
 
 function [halfAngle, minorAngle, perpTrend, perpPlunge] = fitBootEllipse(bVecs, v0)
-% PCA 擬合 Bootstrap 散布橢圓（球面投影後在切平面作 PCA）
+% Bootstrap 散布橢圓
+%
+% 長短軸方向：用 Bingham 方向散布矩陣（T = bVecs*bVecs'/N）特徵值分解
+%             完全在球面上定義，不依賴切平面近似
+% 半角大小：  投影到各主軸方向後取球面角距的 95% 分位數
+%
+% 修改說明：
+%   舊版用切平面 PCA 找長短軸方向，靠近赤道時方向有近似誤差。
+%   新版改用 3×3 方向散布矩陣的特徵向量，與 Jelinek 橢圓的幾何定義一致。
+
     halfAngle = NaN; minorAngle = NaN; perpTrend = NaN; perpPlunge = NaN;
     nB = size(bVecs, 2);
     if nB < 10, return; end
 
-    % 建立以 v0 為中心的切平面正交基底 {e1, e2}
-    if abs(v0(3)) < 0.9, ref = [0;0;1]; else, ref = [1;0;0]; end
-    e1 = cross(v0, ref); e1 = e1 / norm(e1);
-    e2 = cross(v0, e1);  e2 = e2 / norm(e2);
-
-    % 將每個 bootstrap 向量投影到切平面
-    pts = zeros(2, nB);
-    for b = 1:nB
-        vb = bVecs(:,b) / norm(bVecs(:,b));
-        vp = vb - dot(vb, v0) * v0;
-        if norm(vp) > 1e-10
-            pts(1,b) = dot(vp, e1);
-            pts(2,b) = dot(vp, e2);
-        end
-    end
-
-    % PCA：找切平面內的主要散布方向
-    C = cov(pts');
-    [eV, eD] = eig(C);
+    % --- Step 1：Bingham 方向散布矩陣特徵值分解 -------------------
+    % T 的特徵向量即橢圓主軸方向（球面上精確定義）
+    % 對應 v0 的特徵向量是最大特徵值（最集中方向）
+    % 另外兩個特徵向量是橢圓的長軸（次大）和短軸（最小）
+    T = (bVecs * bVecs') / nB;   % 3×3 方向散布矩陣
+    [eV, eD] = eig(T);
     [~, si] = sort(diag(eD), 'descend');
-    mj = eV(:, si(1));   % 長軸方向（切平面內）
-    mn = eV(:, si(2));   % 短軸方向（切平面內）
 
-    % 計算各 bootstrap 樣本在長/短軸方向上的角距
-    aMaj = zeros(nB,1);
-    aMin = zeros(nB,1);
+    % si(1) 對應 v0（最集中方向），si(2) 長軸，si(3) 短軸
+    % 確認 si(1) 確實對應 v0（與 v0 的夾角最小）
+    dots = abs([dot(eV(:,si(1)),v0), dot(eV(:,si(2)),v0), dot(eV(:,si(3)),v0)]);
+    [~, v0idx] = max(dots);
+    axOrder = si([v0idx==1, v0idx==2, v0idx==3]);   % 重排：[v0軸, 長軸, 短軸]
+    % 如果 v0idx==1，axOrder = si([1,2,3]) = si；其他情況重排
+    allIdx = [1 2 3];
+    otherIdx = allIdx(allIdx ~= v0idx);
+    majVec = eV(:, si(otherIdx(1)));   % 長軸特徵向量（球面上）
+    minVec = eV(:, si(otherIdx(2)));   % 短軸特徵向量（球面上）
+
+    % 確保方向朝向下半球（與 v0 同側）
+    if dot(majVec, v0) < 0, majVec = -majVec; end
+    if dot(minVec, v0) < 0, minVec = -minVec; end
+
+    % --- Step 2：計算各 bootstrap 樣本沿長/短軸方向的球面角距 -----
+    aMaj = zeros(nB, 1);
+    aMin = zeros(nB, 1);
+
     for b = 1:nB
         vb  = bVecs(:,b) / norm(bVecs(:,b));
+
+        % 與平均方向 v0 的總球面角距
         ang = acosd(min(1, max(-1, dot(vb, v0))));
-        vp  = vb - dot(vb, v0) * v0;
+
+        % 切平面投影（只用來分解方向，不用來找軸）
+        vp = vb - dot(vb, v0) * v0;
         if norm(vp) > 1e-10
-            vp  = vp / norm(vp);
-            aMaj(b) = ang * dot(vp, e1*mj(1) + e2*mj(2));
-            aMin(b) = ang * dot(vp, e1*mn(1) + e2*mn(2));
+            vp = vp / norm(vp);
+            % 沿長軸方向的角距分量
+            aMaj(b) = ang * dot(vp, majVec);
+            % 沿短軸方向的角距分量
+            aMin(b) = ang * dot(vp, minVec);
         end
     end
 
-    % 95% 分位數當作半角
+    % --- Step 3：95% 分位數當作半角 --------------------------------
     halfAngle  = prctile(abs(aMaj), 95);
     minorAngle = prctile(abs(aMin), 95);
 
-    % 長軸在地理座標的方向（供 drawEllipse 使用）
-    pv = e1*mj(1) + e2*mj(2);
-    pv = pv / norm(pv);
+    % --- Step 4：長軸方向轉為 Trend/Plunge（供 drawEllipse 使用）--
+    pv = majVec;
     if pv(3) < 0, pv = -pv; end
-    perpPlunge = asind(pv(3));
+    perpPlunge = asind(min(1, max(-1, pv(3))));
     perpTrend  = atan2d(pv(2), pv(1));
     if perpTrend < 0, perpTrend = perpTrend + 360; end
 end

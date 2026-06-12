@@ -315,6 +315,53 @@ if ~strcmp(plotChoice, '不畫') && ~isempty(plotChoice)
 
     fprintf('Stereonet 圖檔已儲存至：%s\n', stereoDir);
 end
+%% -------- 批次輸出所有站點 Stereonet ----------------------
+batchDir = fullfile(path, 'Stereonets_Batch');
+meanDir  = fullfile(batchDir, 'Mean');
+rawDir   = fullfile(batchDir, 'Raw');
+strainDir = fullfile(batchDir, 'Strain');
+if ~exist(meanDir,   'dir'), mkdir(meanDir);   end
+if ~exist(rawDir,    'dir'), mkdir(rawDir);    end
+if ~exist(strainDir, 'dir'), mkdir(strainDir); end
+
+% 快速 renderer
+set(0, 'DefaultFigureRenderer', 'painters');
+
+fprintf('\n========== 批次輸出所有站點 Stereonet ==========\n');
+
+% 先把需要的資料擷取成一般陣列，parfor 內不能存取 struct 的 cell 欄位
+nG         = nGroups;
+numList    = results.Number;
+grpLabels  = results.GroupLabel;
+Eg_e1_t    = results.Eg_e1_trend;
+Eg_e1_p    = results.Eg_e1_plunge;
+Eg_e2_t    = results.Eg_e2_trend;
+Eg_e2_p    = results.Eg_e2_plunge;
+Eg_e3_t    = results.Eg_e3_trend;
+Eg_e3_p    = results.Eg_e3_plunge;
+Eg_e1_vals = results.Eg_e1;
+Eg_e3_vals = results.Eg_e3;
+
+parfor g = 1:nG
+    num = numList(g);
+
+    % --- Mean ---
+    plotStereonetBatch(results, rawData, num, 'mean', 'none', meanDir, 200);
+
+    % --- Raw ---
+    plotStereonetBatch(results, rawData, num, 'raw', 'both', rawDir, 200);
+
+    % --- Strain ---
+    plotStrainStereonetBatch( ...
+        num, grpLabels{g}, ...
+        Eg_e1_t(g), Eg_e1_p(g), ...
+        Eg_e2_t(g), Eg_e2_p(g), ...
+        Eg_e3_t(g), Eg_e3_p(g), ...
+        Eg_e1_vals(g), Eg_e3_vals(g), ...
+        strainDir);
+end
+
+fprintf('批次輸出完成。\n');
 %% -------- 本地輔助函式 ----------------------------------------
 function val = getFieldSafe(s, fieldName)
     if isfield(s, fieldName)
